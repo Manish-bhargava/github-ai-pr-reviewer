@@ -1,0 +1,132 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-codereviewer}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-codereviewer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: db/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8100:8000"
+    environment:
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      WEBHOOK_SERVICE_URL: ${WEBHOOK_SERVICE_URL:-http://webhook:8001}
+    depends_on:
+      webhook:
+        condition: service_started
+
+  webhook:
+    build:
+      context: .
+      dockerfile: services/webhook/Dockerfile
+    ports:
+      - "8101:8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ORCHESTRATOR_SERVICE_URL: ${ORCHESTRATOR_SERVICE_URL:-http://orchestrator:8002}
+      LEARNER_SERVICE_URL: ${LEARNER_SERVICE_URL:-http://learner:8004}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  webhook-worker:
+    build:
+      context: .
+      dockerfile: services/webhook/Dockerfile
+    command: celery -A worker worker --loglevel=info -Q webhook,learning -c 2
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ORCHESTRATOR_SERVICE_URL: ${ORCHESTRATOR_SERVICE_URL:-http://orchestrator:8002}
+      LEARNER_SERVICE_URL: ${LEARNER_SERVICE_URL:-http://learner:8004}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      learner:
+        condition: service_started
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    ports:
+      - "8102:8002"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      REVIEWER_SERVICE_URL: ${REVIEWER_SERVICE_URL:-http://reviewer:8003}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  reviewer:
+    build:
+      context: .
+      dockerfile: services/reviewer/Dockerfile
+    ports:
+      - "8103:8003"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  learner:
+    build:
+      context: .
+      dockerfile: services/learner/Dockerfile
+    ports:
+      - "8104:8004"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:password@postgres:5432/codereviewer}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

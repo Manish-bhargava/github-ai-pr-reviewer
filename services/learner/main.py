@@ -1,37 +1,51 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
-from sqlalchemy import select, update
-
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from models import Settings, Finding, Pattern, LearnRequest
+from models import Finding, LearnRequest, Pattern, Settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 settings = Settings()
-engine = create_async_engine(settings.database_url)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-app = FastAPI()
-Instrumentator().instrument(app).expose(app)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Learner service starting")
+    yield
+    await engine.dispose()
+    logger.info("Learner service stopped")
+
+
+app = FastAPI(title="Learner Service", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "learner"}
 
 
 @app.post("/learn")
 async def learn(request: LearnRequest):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(Finding)
-            .where(
+            select(Finding).where(
                 Finding.pr_id == request.pr_id,
                 Finding.severity.in_(["warning", "error"]),
             )
         )
         findings = result.scalars().all()
+        logger.info("Learning from %d findings for PR %s", len(findings), request.pr_id)
 
         for finding in findings:
             stmt = (
@@ -43,11 +57,14 @@ async def learn(request: LearnRequest):
                 )
                 .on_conflict_do_update(
                     index_elements=["repo_full_name", "pattern_text"],
-                    set_={"frequency": Pattern.frequency + 1},
+                    set_={
+                        "frequency": Pattern.frequency + 1,
+                        "updated_at": func.now(),
+                    },
                 )
             )
             await session.execute(stmt)
 
         await session.commit()
 
-    return {"status": "ok"}
+    return {"status": "ok", "patterns_updated": len(findings)}

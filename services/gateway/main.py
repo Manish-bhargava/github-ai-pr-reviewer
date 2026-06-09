@@ -1,68 +1,65 @@
 import hashlib
 import hmac
+import logging
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from prometheus_fastapi_instrumentator import Instrumentator
 
 from models import Settings
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 settings = Settings()
 
-app = FastAPI()
+app = FastAPI(title="Gateway Service")
 
-Instrumentator().instrument(app).expose(app)
+
+@app.get("/")
+async def root():
+    return {
+        "service": "gateway",
+        "status": "running",
+        "endpoints": {
+            "health": "GET /health",
+            "github_webhook": "POST /webhook/github",
+        },
+    }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "gateway"}
 
-# Receives webhook events from GitHub and verifies their authenticity
-# using HMAC-SHA256 signature validation with a shared secret.
-# After successful verification, the event is forwarded to the internal
-# webhook processing service for further handling.
+
 @app.post("/webhook/github")
 async def github_webhook(request: Request):
-
     body = await request.body()
+    signature_header = request.headers.get("X-Hub-Signature-256", "")
 
-    signature_header = request.headers.get(
-        "X-Hub-Signature-256",
-        ""
-    )
+    if not settings.github_webhook_secret:
+        logger.warning("GITHUB_WEBHOOK_SECRET is not set; rejecting webhook")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
 
     secret = settings.github_webhook_secret.encode()
-
-    hmac_object = hmac.new(
-        secret,
-        body,
-        hashlib.sha256
-    )
-
-    generated_signature = hmac_object.hexdigest()
-
+    generated_signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
     expected = "sha256=" + generated_signature
 
-    if not hmac.compare_digest(
-        expected,
-        signature_header
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid signature"
-        )
+    if not hmac.compare_digest(expected, signature_header):
+        logger.warning("Invalid GitHub webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     async with httpx.AsyncClient() as client:
-
         response = await client.post(
-            "http://webhook:8001/events",
+            f"{settings.webhook_service_url}/events",
             content=body,
-            headers={
-                "Content-Type": "application/json"
-            },
+            headers={"Content-Type": "application/json"},
+            timeout=30,
         )
-
         response.raise_for_status()
 
+    logger.info("Forwarded GitHub webhook to webhook service")
     return {"status": "ok"}

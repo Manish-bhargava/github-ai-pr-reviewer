@@ -1,31 +1,48 @@
+import asyncio
+import logging
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 import jwt
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from models import Settings, Finding, Pattern, AnalyzeRequest
 from graph import build_graph
+from models import AnalyzeRequest, Finding, Pattern, Settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 settings = Settings()
-engine = create_async_engine(settings.database_url)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-app = FastAPI()
-Instrumentator().instrument(app).expose(app)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Orchestrator service starting")
+    yield
+    await engine.dispose()
+    logger.info("Orchestrator service stopped")
+
+
+app = FastAPI(title="Orchestrator Service", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "orchestrator"}
 
 
 @app.post("/analyze", status_code=202)
 async def analyze(request: AnalyzeRequest):
+    logger.info("Analyzing PR %s/%s", request.repo_full_name, request.pr_number)
+
     token = await get_installation_token(request.installation_id)
     diff = await fetch_diff(request.repo_full_name, request.pr_number, token)
 
@@ -38,24 +55,30 @@ async def analyze(request: AnalyzeRequest):
         )
         patterns = [row.pattern_text for row in result.scalars().all()]
 
-    state = build_graph().invoke({"diff": diff, "patterns": patterns, "findings": []})
-    findings_data = state.get("findings", [])
+    state = await asyncio.to_thread(
+        build_graph().invoke,
+        {"diff": diff, "patterns": patterns, "findings": [], "deduplicated_findings": []},
+    )
+    findings_data = state.get("deduplicated_findings") or state.get("findings", [])
+    logger.info("Found %d findings for PR %s/%s", len(findings_data), request.repo_full_name, request.pr_number)
 
     async with AsyncSessionLocal() as session:
-        for f in findings_data:
-            session.add(Finding(
-                pr_id=request.pr_id,
-                file=f.get("file"),
-                line=f.get("line"),
-                severity=f.get("severity"),
-                message=f.get("message"),
-                agent=f.get("agent"),
-            ))
+        for finding in findings_data:
+            session.add(
+                Finding(
+                    pr_id=request.pr_id,
+                    file=finding.get("file"),
+                    line=finding.get("line"),
+                    severity=finding.get("severity"),
+                    message=finding.get("message"),
+                    agent=finding.get("agent"),
+                )
+            )
         await session.commit()
 
     async with httpx.AsyncClient() as client:
-        await client.post(
-            "http://reviewer:8003/post-review",
+        response = await client.post(
+            f"{settings.reviewer_service_url}/post-review",
             json={
                 "pr_id": str(request.pr_id),
                 "repo_full_name": request.repo_full_name,
@@ -65,8 +88,10 @@ async def analyze(request: AnalyzeRequest):
             },
             timeout=60,
         )
+        response.raise_for_status()
 
-    return {"status": "accepted"}
+    logger.info("Review posted for PR %s/%s", request.repo_full_name, request.pr_number)
+    return {"status": "accepted", "findings_count": len(findings_data)}
 
 
 async def get_installation_token(installation_id: int) -> str:

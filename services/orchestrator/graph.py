@@ -1,13 +1,23 @@
 import json
+import logging
 import operator
 import re
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 
-from langfuse.openai import OpenAI
-from langgraph.graph import StateGraph, END
+from openai import OpenAI
 from langgraph.constants import Send
+from langgraph.graph import END, StateGraph
 
-client = OpenAI()
+logger = logging.getLogger(__name__)
+
+_client = None
+
+
+def get_openai_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI()
+    return _client
 
 PROMPTS = {
     "static_analysis": "You are a static analysis tool. Review this git diff for code complexity issues, unused variables, and poor naming. Return only a JSON array. Each item must have keys: file, line, severity (info/warning/error), message.",
@@ -23,7 +33,8 @@ def parse_json_response(raw: str) -> list:
         raw = match.group(1).strip()
     try:
         return json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse agent JSON response")
         return []
 
 
@@ -31,39 +42,54 @@ class GraphState(TypedDict):
     diff: str
     patterns: list[str]
     findings: Annotated[list[dict], operator.add]
+    deduplicated_findings: list[dict]
 
 
 def make_node(agent_name: str, get_prompt):
     def node(state: GraphState) -> dict:
         prompt = get_prompt(state) if callable(get_prompt) else get_prompt
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": state["diff"]},
-            ],
-        )
-        items = parse_json_response(response.choices[0].message.content)
+        try:
+            response = get_openai_client().chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": state["diff"]},
+                ],
+            )
+            items = parse_json_response(response.choices[0].message.content)
+        except Exception:
+            logger.exception("Agent %s failed", agent_name)
+            items = []
         for item in items:
             item["agent"] = agent_name
         return {"findings": items}
+
     return node
 
 
 def _style_prompt(state: GraphState) -> str:
     patterns_str = "\n".join(state["patterns"]) if state["patterns"] else "None"
-    return f"You are a code style reviewer. Review this git diff for formatting, readability, and consistency issues. Common patterns this team has had before: {patterns_str}. Return only a JSON array. Each item must have keys: file, line, severity, message."
+    return (
+        "You are a code style reviewer. Review this git diff for formatting, readability, "
+        f"and consistency issues. Common patterns this team has had before: {patterns_str}. "
+        "Return only a JSON array. Each item must have keys: file, line, severity, message."
+    )
 
 
 def merge_node(state: GraphState) -> dict:
     seen = set()
     merged = []
     for finding in state["findings"]:
-        key = (finding.get("file"), finding.get("line"), finding.get("agent"), finding.get("message"))
+        key = (
+            finding.get("file"),
+            finding.get("line"),
+            finding.get("agent"),
+            finding.get("message"),
+        )
         if key not in seen:
             seen.add(key)
             merged.append(finding)
-    return {"findings": merged}
+    return {"deduplicated_findings": merged}
 
 
 def fan_out(state: GraphState):
@@ -75,7 +101,7 @@ def fan_out(state: GraphState):
     ]
 
 
-def build_graph() -> StateGraph:
+def build_graph():
     builder = StateGraph(GraphState)
 
     builder.add_node("static_analysis", make_node("static_analysis", PROMPTS["static_analysis"]))

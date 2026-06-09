@@ -6,4 +6,3 @@ sqlalchemy[asyncio]
 asyncpg
 PyJWT
 cryptography
-prometheus-fastapi-instrumentator

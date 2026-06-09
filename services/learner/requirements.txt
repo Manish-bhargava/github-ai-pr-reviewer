@@ -6,4 +6,3 @@ sqlalchemy[asyncio]
 asyncpg
 celery
 redis
-prometheus-fastapi-instrumentator

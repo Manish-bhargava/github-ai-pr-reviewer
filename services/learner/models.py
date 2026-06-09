@@ -1,13 +1,14 @@
 import uuid
-from sqlalchemy import Column, Integer, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.sql import func
-from sqlalchemy import TIMESTAMP
+
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+from sqlalchemy import TIMESTAMP, Column, ForeignKey, Integer, Text, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class Finding(Base):
@@ -29,7 +30,7 @@ class Pattern(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     repo_full_name = Column(Text, nullable=False)
     pattern_text = Column(Text, nullable=False)
-    frequency = Column(Integer, default=1)
+    frequency = Column(Integer, server_default="1")
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
@@ -40,7 +41,6 @@ class LearnRequest(BaseModel):
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://user:password@postgres:5432/codereviewer"
-    redis_url: str = "redis://redis:6379/0"
 
     class Config:
         env_file = ".env"

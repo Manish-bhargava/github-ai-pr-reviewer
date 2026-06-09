@@ -27,7 +27,7 @@ def upgrade() -> None:
             server_default=sa.text("gen_random_uuid()"),
             nullable=False,
         ),
-        sa.Column("repo_full_name", sa.Texxt(), nullable=False),
+        sa.Column("repo_full_name", sa.Text(), nullable=False),
         sa.Column("pr_number", sa.Integer(), nullable=False),
         sa.Column("head_sha", sa.Text(), nullable=False),
         sa.Column("installation_id", sa.BigInteger(), nullable=False),

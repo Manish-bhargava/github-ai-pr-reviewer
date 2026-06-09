@@ -4,6 +4,7 @@ httpx
 pydantic-settings
 sqlalchemy[asyncio]
 asyncpg
-alembic
-celery
-redis
+PyJWT
+cryptography
+langgraph
+openai

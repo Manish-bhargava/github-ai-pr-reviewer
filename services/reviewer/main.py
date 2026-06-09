@@ -1,59 +1,83 @@
+import logging
 import time
+from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 import jwt
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import update
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from models import Settings, PullRequest, ReviewRequest
+from models import PullRequest, ReviewRequest, Settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 settings = Settings()
-engine = create_async_engine(settings.database_url)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-app = FastAPI()
-Instrumentator().instrument(app).expose(app)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Reviewer service starting")
+    yield
+    await engine.dispose()
+    logger.info("Reviewer service stopped")
+
+
+app = FastAPI(title="Reviewer Service", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "reviewer"}
 
-# convert one finding into readable text
-def _finding_summary_line(f: dict) -> str:
-    severity = f.get("severity", "info").upper()
-    return f"**[{severity}]** `{f.get('file', 'unknown')}:{f.get('line', '?')}` ({f.get('agent', '')})\n{f.get('message', '')}\n"
 
-# merge all finding to write review
-def _build_summary(findings: list) -> str:
+def _finding_summary_line(finding: dict[str, Any]) -> str:
+    severity = finding.get("severity", "info").upper()
+    return (
+        f"**[{severity}]** `{finding.get('file', 'unknown')}:{finding.get('line', '?')}` "
+        f"({finding.get('agent', '')})\n{finding.get('message', '')}\n"
+    )
+
+
+def _build_summary(findings: list[dict[str, Any]]) -> str:
     lines = ["## AI Code Review\n"] + [_finding_summary_line(f) for f in findings]
     return "\n".join(lines)
 
 
 @app.post("/post-review")
 async def post_review(request: ReviewRequest):
-    token = get_installation_token(request.installation_id)
-
     if not request.findings:
-        return {"status": "ok"}
-     # adding inlimne comment to summary 
+        logger.info("No findings for PR %s/%s; skipping GitHub review", request.repo_full_name, request.pr_number)
+        return {"status": "ok", "skipped": True}
+
+    token = await get_installation_token(request.installation_id)
+
     inline_comments = []
-    for f in request.findings:
+    for finding in request.findings:
         try:
-            line = int(f.get("line") or 0)
+            line = int(finding.get("line") or 0)
         except (ValueError, TypeError):
             line = 0
-        if f.get("file") and line > 0:
-            inline_comments.append({
-                "path": f.get("file"),
-                "line": line,
-                "side": "RIGHT",
-                "body": f"**[{f.get('severity', 'info').upper()}]** ({f.get('agent', '')})\n{f.get('message', '')}",
-            })
-   # sending headers
+        if finding.get("file") and line > 0:
+            inline_comments.append(
+                {
+                    "path": finding.get("file"),
+                    "line": line,
+                    "side": "RIGHT",
+                    "body": (
+                        f"**[{finding.get('severity', 'info').upper()}]** "
+                        f"({finding.get('agent', '')})\n{finding.get('message', '')}"
+                    ),
+                }
+            )
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json",
@@ -68,8 +92,8 @@ async def post_review(request: ReviewRequest):
             headers=headers,
             timeout=30,
         )
-        #sometime github reject inline comment so again we are doing 
         if response.status_code == 422 and inline_comments:
+            logger.warning("Inline comments rejected; posting summary-only review")
             response = await client.post(
                 url,
                 json={"event": "COMMENT", "body": summary},
@@ -84,17 +108,18 @@ async def post_review(request: ReviewRequest):
         )
         await session.commit()
 
+    logger.info("Posted review for PR %s/%s", request.repo_full_name, request.pr_number)
     return {"status": "ok"}
 
 
-def get_installation_token(installation_id: int) -> str:
+async def get_installation_token(installation_id: int) -> str:
     now = int(time.time())
     payload = {"iat": now - 60, "exp": now + 600, "iss": settings.github_app_id}
     private_key = settings.github_app_private_key.replace("\\n", "\n")
     encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256")
 
-    with httpx.Client() as client:
-        response = client.post(
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
             f"https://api.github.com/app/installations/{installation_id}/access_tokens",
             headers={
                 "Authorization": f"Bearer {encoded_jwt}",

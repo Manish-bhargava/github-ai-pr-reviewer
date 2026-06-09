@@ -1,12 +1,13 @@
 import uuid
-from sqlalchemy import BigInteger, Column, Integer, Text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.sql import func
-from sqlalchemy import TIMESTAMP
-from pydantic_settings import BaseSettings
 
-Base = declarative_base()
+from pydantic_settings import BaseSettings
+from sqlalchemy import TIMESTAMP, BigInteger, Column, Integer, Text, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 class PullRequest(Base):
@@ -17,13 +18,15 @@ class PullRequest(Base):
     pr_number = Column(Integer, nullable=False)
     head_sha = Column(Text, nullable=False)
     installation_id = Column(BigInteger, nullable=False)
-    status = Column(Text, nullable=False, default="pending")
+    status = Column(Text, nullable=False, server_default="pending")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://user:password@postgres:5432/codereviewer"
     redis_url: str = "redis://redis:6379/0"
+    orchestrator_service_url: str = "http://orchestrator:8002"
+    learner_service_url: str = "http://learner:8004"
 
     class Config:
         env_file = ".env"

@@ -23,10 +23,10 @@ class PullRequest(Base):
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://user:password@postgres:5432/codereviewer"
+    database_url: str = "postgresql+asyncpg://neondb_owner:npg_lpJ0oW4UQzAL@ep-noisy-dust-aqasra2u-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
     redis_url: str = "redis://redis:6379/0"
-    orchestrator_service_url: str = "http://orchestrator:8002"
-    learner_service_url: str = "http://learner:8004"
+    orchestrator_service_url: str = "https://github-ai-pr-reviewer-orchestrator.onrender.com"
+    learner_service_url: str = "https://github-ai-pr-reviewer-learner.onrender.com"
 
     class Config:
         env_file = ".env"

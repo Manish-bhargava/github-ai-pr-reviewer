@@ -55,11 +55,11 @@ class AnalyzeRequest(BaseModel):
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://user:password@postgres:5432/codereviewer"
+    database_url: str = "postgresql+asyncpg://neondb_owner:npg_lpJ0oW4UQzAL@ep-noisy-dust-aqasra2u-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
     github_app_id: str = ""
     github_app_private_key: str = ""
     openai_api_key: str = ""
-    reviewer_service_url: str = "http://reviewer:8003"
+    reviewer_service_url: str = "https://github-ai-pr-reviewer-reviewer.onrender.com"
 
     class Config:
         env_file = ".env"

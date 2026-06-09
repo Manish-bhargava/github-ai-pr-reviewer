@@ -1,10 +1,15 @@
+
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY services/reviewer/requirements.txt /app/requirements.txt
+# install dependencies
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
+# copy webhook service code
+COPY . /app
 
-CMD ["uvicorn", "services.reviewer.main:app", "--host", "0.0.0.0", "--port", "8003"]
+# run app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

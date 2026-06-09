@@ -1,10 +1,15 @@
+
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY services/learner/requirements.txt /app/requirements.txt
+# install dependencies
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
+# copy learner service code
+COPY . /app
 
-CMD ["uvicorn", "services.learner.main:app", "--host", "0.0.0.0", "--port", "8004"]
+# run app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]

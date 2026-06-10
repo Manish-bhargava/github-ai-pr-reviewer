@@ -37,7 +37,10 @@ app = FastAPI(title="Orchestrator Service", lifespan=lifespan)
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "orchestrator"}
-
+@app.post("/test")
+async def test():
+    print("QSTASH HIT THIS ENDPOINT")
+    return {"status": "ok"}
 
 @app.post("/analyze", status_code=202)
 async def analyze(request: AnalyzeRequest):

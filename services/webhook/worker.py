@@ -18,10 +18,13 @@ learner_service_url = os.environ.get(
 qstash_url = os.environ["QSTASH_URL"]
 qstash_token = os.environ["QSTASH_TOKEN"]
 
+# QStash Client
 client = QStash(
-    qstash_url,
     qstash_token,
+    base_url=qstash_url,
 )
+
+logger.info("✅ QStash client initialized")
 
 
 def analyze_pr(
@@ -32,27 +35,37 @@ def analyze_pr(
     installation_id: int,
 ):
     logger.info(
-        "Queueing analysis for %s/%s",
+        "🚀 Publishing analysis job for %s/%s",
         repo_full_name,
         pr_number,
     )
 
-    client.publish(
-        url=f"{orchestrator_service_url}/analyze",
-        body={
-            "pr_id": pr_id,
-            "pr_number": pr_number,
-            "repo_full_name": repo_full_name,
-            "head_sha": head_sha,
-            "installation_id": installation_id,
-        },
-    )
+    try:
+        response = client.message.publish_json(
+            url=f"{orchestrator_service_url}/analyze",
+            body={
+                "pr_id": pr_id,
+                "pr_number": pr_number,
+                "repo_full_name": repo_full_name,
+                "head_sha": head_sha,
+                "installation_id": installation_id,
+            },
+        )
 
-    logger.info(
-        "Analysis queued for %s/%s",
-        repo_full_name,
-        pr_number,
-    )
+        logger.info(
+            "✅ Analysis published to QStash: %s",
+            response,
+        )
+
+        return response
+
+    except Exception:
+        logger.exception(
+            "❌ Failed to publish analysis job for %s/%s",
+            repo_full_name,
+            pr_number,
+        )
+        raise
 
 
 def trigger_learning(
@@ -60,21 +73,31 @@ def trigger_learning(
     pr_id: str,
 ):
     logger.info(
-        "Queueing learning for %s PR %s",
+        "🚀 Publishing learning job for %s PR %s",
         repo_full_name,
         pr_id,
     )
 
-    client.publish(
-        url=f"{learner_service_url}/learn",
-        body={
-            "repo_full_name": repo_full_name,
-            "pr_id": pr_id,
-        },
-    )
+    try:
+        response = client.message.publish_json(
+            url=f"{learner_service_url}/learn",
+            body={
+                "repo_full_name": repo_full_name,
+                "pr_id": pr_id,
+            },
+        )
 
-    logger.info(
-        "Learning queued for %s PR %s",
-        repo_full_name,
-        pr_id,
-    )
+        logger.info(
+            "✅ Learning published to QStash: %s",
+            response,
+        )
+
+        return response
+
+    except Exception:
+        logger.exception(
+            "❌ Failed to publish learning job for %s PR %s",
+            repo_full_name,
+            pr_id,
+        )
+        raise

@@ -7,3 +7,4 @@ asyncpg
 alembic
 celery
 redis
+qstash

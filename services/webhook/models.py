@@ -25,6 +25,8 @@ class PullRequest(Base):
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://neondb_owner:npg_lpJ0oW4UQzAL@ep-noisy-dust-aqasra2u-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
     redis_url: str = "redis://redis:6379/0"
+    qstash_token: str
+    qstash_url: str = "https://qstash.upstash.io/v2/publish"
     orchestrator_service_url: str = "https://github-ai-pr-reviewer-orchestrator.onrender.com"
     learner_service_url: str = "https://github-ai-pr-reviewer-learner.onrender.com"
 

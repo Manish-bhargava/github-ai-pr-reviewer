@@ -96,11 +96,11 @@ async def test():
 #     logger.info("Review posted for PR %s/%s", request.repo_full_name, request.pr_number)
 #     return {"status": "accepted", "findings_count": len(findings_data)}
 @app.post("/learn")
-async def learn(request: LearnRequest):
+async def learn(request):
     print("🔥 LEARN HIT")
     return {"ok": True}
 @app.post("/analyze")
-async def analyze(request: AnalyzeRequest):
+async def analyze(request):
     print("🔥 ANALYZE HIT")
     print(request)
     return {"ok": True}

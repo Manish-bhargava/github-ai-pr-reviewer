@@ -54,11 +54,17 @@ class AnalyzeRequest(BaseModel):
     installation_id: int
 
 
+class LearnRequest(BaseModel):
+    repo_full_name: str
+    pr_id: str
+
+
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://neondb_owner:npg_lpJ0oW4UQzAL@ep-noisy-dust-aqasra2u-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
-    github_app_id: str = ""
-    github_app_private_key: str = ""
-    openai_api_key: str = ""
+    database_url: str
+    github_app_id: str
+    github_app_private_key: str
+    openai_api_key: str
+
     reviewer_service_url: str = "https://github-ai-pr-reviewer-reviewer.onrender.com"
 
     class Config:

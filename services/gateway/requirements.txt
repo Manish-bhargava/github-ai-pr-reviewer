@@ -1,6 +1,6 @@
-fastapi          ← API framework
-uvicorn[standard]← server (matches your Dockerfile CMD)
-httpx            ← forward webhook to webhook service
-pydantic-settings← Settings class in models.py
-sqlalchemy[asyncio] ← async DB queries
-asyncpg          ← PostgreSQL async driver for Neon
+fastapi        
+uvicorn[standard]
+httpx          
+pydantic-settings
+sqlalchemy[asyncio] 
+asyncpg         

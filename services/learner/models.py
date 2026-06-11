@@ -40,7 +40,7 @@ class LearnRequest(BaseModel):
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://neondb_owner:npg_lpJ0oW4UQzAL@ep-noisy-dust-aqasra2u-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require"
+    database_url: str = ""
 
     class Config:
         env_file = ".env"

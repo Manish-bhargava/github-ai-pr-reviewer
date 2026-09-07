@@ -1,13 +1,7 @@
 
-# main.py — Gateway Service
-# Handles:
-#   - GitHub webhook forwarding
-#   - GitHub App installation URL
-
 import hashlib
 import hmac
 import logging
-from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -31,24 +25,12 @@ logger = logging.getLogger(__name__)
 settings = Settings()
 
 
-# ─── Lifespan ───────────────────────────────────────────────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("🚀 Gateway Service starting")
-
-    yield
-
-    logger.info("🛑 Gateway Service stopped")
-
-
 # ─── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(
-    title="Gateway Service",
-    lifespan=lifespan,
-)
+app = FastAPI(title="Gateway Service")
 
+
+# ─── CORS ───────────────────────────────────────────────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,13 +67,16 @@ async def health():
 
 @app.post("/webhook/github")
 async def github_webhook(request: Request):
+    # Get the raw webhook body
     body = await request.body()
 
+    # Get GitHub's signature
     signature_header = request.headers.get(
         "X-Hub-Signature-256",
         "",
     )
 
+    # Make sure webhook secret is configured
     if not settings.github_webhook_secret:
         logger.error("GITHUB_WEBHOOK_SECRET not configured")
         raise HTTPException(
@@ -99,7 +84,7 @@ async def github_webhook(request: Request):
             detail="Webhook secret not configured",
         )
 
-    # Verify GitHub webhook signature
+    # Generate our own HMAC-SHA256 signature
     secret = settings.github_webhook_secret.encode()
 
     generated_signature = hmac.new(
@@ -110,21 +95,23 @@ async def github_webhook(request: Request):
 
     expected_signature = f"sha256={generated_signature}"
 
+    # Compare our signature with GitHub's signature
     if not hmac.compare_digest(
         expected_signature,
         signature_header,
     ):
         logger.warning("Invalid GitHub webhook signature")
+
         raise HTTPException(
             status_code=401,
             detail="Invalid signature",
         )
 
-    # Forward webhook to webhook service
+    # Forward the verified webhook to the webhook service
     webhook_url = f"{settings.webhook_service_url}/events"
 
     logger.info(
-        "Forwarding GitHub webhook to %s",
+        "Forwarding webhook to %s",
         webhook_url,
     )
 
@@ -160,13 +147,13 @@ async def github_webhook(request: Request):
     }
 
 
-# ─── GitHub App Installation / OAuth ────────────────────────────────────────
+# ─── GitHub App Installation ────────────────────────────────────────────────
 
 @app.get("/api/github/install-url")
 async def get_install_url():
     """
     Returns the GitHub App installation URL.
-    Used by the frontend GitHub Connect button.
+    Used by the frontend Connect GitHub button.
     """
 
     if not settings.github_app_name:
